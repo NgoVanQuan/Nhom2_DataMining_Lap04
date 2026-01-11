@@ -1,254 +1,101 @@
-# Beijing Multi-Site Air Quality — Classification + Regression + Time Series (ARIMA)
+# BÁO CÁO LAB 4: DỰ BÁO CHẤT LƯỢNG KHÔNG KHÍ (TIME SERIES FORECASTING)
 
-Phân tích dữ liệu chất lượng không khí **Beijing Multi-Site Air Quality (12 stations)** để xây dựng một pipeline hoàn chỉnh gồm:
-
-- **Phân lớp mức độ ô nhiễm (AQI level)**: tạo nhãn từ **PM2.5 rolling 24h**, nhưng **KHÔNG dùng PM2.5** trong tập đặc trưng đầu vào (tránh leakage).
-- **Hồi quy (Regression)**: dự đoán **PM2.5 tương lai** theo horizon (ví dụ t+1, t+24…).
-- **Chuỗi thời gian (Time Series)**: phân tích đặc điểm dữ liệu time series “đúng bài giảng” và dự báo **chỉ dùng ARIMA** (statsmodels).
-
-Project triển khai theo pipeline notebook → module hoá trong `src/` → tự động chạy bằng **Papermill** để phục vụ giảng dạy & demo ra quyết định chọn mô hình.
+**Môn học:** Khai phá dữ liệu (Data Mining)  
+**Nhóm thực hiện:** Nhóm 2  
+**Dataset:** Beijing Multi-Site Air-Quality Data (PRSA2017)  
+**Mục tiêu:** Dự báo nồng độ bụi mịn PM2.5 tại trạm Aotizhongxin dựa trên dữ liệu lịch sử.
 
 ---
 
-## Features
+## 📌 PHẦN 1: TIỀN XỬ LÝ DỮ LIỆU & EDA (QUESTION 1)
 
-### 1) Classification (No PM2.5 in features)
-- Load & merge dữ liệu từ nhiều trạm
-- Làm sạch dữ liệu: missing, kiểu thời gian, chuẩn hoá numeric/object
-- Tạo nhãn **AQI class** từ `pm25_24h` (rolling mean 24h)
-- **Không dùng PM2.5 / pm25_24h làm feature**
-- Đánh giá: Accuracy, Precision/Recall/F1, Confusion Matrix
-- Lưu artifacts: metrics + prediction sample
+### 1.1. Tải và Làm sạch dữ liệu
+* **Dữ liệu thô:** Dataset bao gồm dữ liệu chất lượng không khí từ năm 2013 đến 2017.
+* **Kích thước:** `(420768, 18)` dòng/cột.
+* **Các bước xử lý chính:**
+    * Xử lý giá trị thiếu (Missing values) bằng phương pháp nội suy tuyến tính (Linear Interpolation).
+    * Chuyển đổi cột thời gian (`datetime`) và set làm index.
+    * **Feature Engineering:**
+        * Tạo đặc trưng thời gian: Giờ, Ngày, Tháng, Năm.
+        * Tạo đặc trưng độ trễ (**Lag features**): `lag_1` (1h trước), `lag_3`, `lag_24` (1 ngày trước).
+        * Tạo nhãn phân lớp `aqi_class` (Good, Moderate, Unhealthy...) dựa trên chỉ số PM2.5.
 
-### 2) Regression (Supervised)
-- Tạo bài toán hồi quy theo time-based split (tránh leakage)
-- Feature engineering cho hồi quy:
-  - time features (hour/day/month/…)
-  - lag features (theo cấu hình)
-- Dự đoán `PM2.5(t + horizon)`
-- Đánh giá: RMSE, MAE, R2
-- Lưu artifacts: model + metrics + prediction sample
+**Kết quả:** Bộ dữ liệu sạch `(420768, 55)` sẵn sàng cho huấn luyện.
 
-### 3) Time Series Forecasting (ARIMA only)
-- Xây dựng chuỗi đơn biến theo **1 trạm** (univariate PM2.5)
-- Phân tích đặc điểm dữ liệu chuỗi thời gian “đúng bài giảng”:
-  - missingness & resampling
-  - rolling mean/std
-  - stationarity tests (ADF/KPSS)
-  - ACF/PACF để định hướng p,q
-  - quyết định d (sai phân) theo kiểm định + quan sát
-- Fit & chọn ARIMA theo AIC/BIC (grid nhỏ)
-- Dự báo + lưu artifacts: summary, predictions, model
+### 1.2. Phân tích khám phá (EDA)
+* **Phân bố nhãn lớp:** Dữ liệu có sự mất cân bằng nhẹ, phản ánh thực tế ô nhiễm tại Bắc Kinh (các lớp AQI xấu chiếm tỷ trọng đáng kể).
+* **Missing Data:** Các cột Lag mới tạo (ví dụ `CO_lag24`) sẽ có giá trị thiếu ở đầu chuỗi do phép dịch chuyển thời gian.
+
+<
+<div align="center">
+  <img src="images/anh1.png" width="700" alt="AQI">
+</div>
+
 
 ---
 
-## Project Structure
+## 📌 PHẦN 2: MÔ HÌNH HỒI QUY CƠ SỞ (QUESTION 2 - REGRESSION)
 
-```text
-air_quality_timeseries/
-├── data/
-│   ├── raw/
-│   │   └── PRSA2017_Data_20130301-20170228.zip
-│   └── processed/
-│       ├── cleaned.parquet
-│       ├── dataset_for_clf.parquet
-│       ├── metrics.json
-│       ├── predictions_sample.csv
-│       ├── dataset_for_regression.parquet
-│       ├── regressor.joblib
-│       ├── regression_metrics.json
-│       ├── regression_predictions_sample.csv
-│       ├── arima_pm25_summary.json
-│       ├── arima_pm25_predictions.csv
-│       └── arima_pm25_model.pkl
-│
-├── notebooks/
-│   ├── preprocessing_and_eda.ipynb
-│   ├── feature_preparation.ipynb
-│   ├── classification_modelling.ipynb
-│   ├── regression_modelling.ipynb
-│   ├── arima_forecasting.ipynb
-│   └── runs/
-│       ├── preprocessing_and_eda_run.ipynb
-│       ├── feature_preparation_run.ipynb
-│       ├── classification_modelling_run.ipynb
-│       ├── regression_modelling_run.ipynb
-│       └── arima_forecasting_run.ipynb
-│
-├── src/
-│   ├── classification_library.py
-│   ├── regression_library.py
-│   ├── timeseries_library.py
-│   └── __init__.py
-│
-├── run_papermill.py
-├── requirements.txt
-└── README.md
+### 2.1. Phương pháp tiếp cận
+* **Mô hình:** Linear Regression.
+* **Chiến lược:** Chuyển bài toán chuỗi thời gian thành bài toán **Hồi quy có giám sát (Supervised Learning)**. Dự báo `PM2.5(t)` dựa trên các biến trễ `PM2.5(t-1)`, `PM2.5(t-24)`...
+* **Chia dữ liệu:**
+    * **Train:** 2013 - 2016.
+    * **Test:** 2017.
 
-```
+### 2.2. Kết quả mô hình
+Mô hình Hồi quy hoạt động **rất hiệu quả**, đường dự báo bám sát thực tế.
 
-## Installation
+**Bảng chỉ số đánh giá (Metrics):**
 
-```bash
-git clone <your_repo_url>
-cd air_quality_timeseries
-pip install -r requirements.txt
-```
+| Chỉ số | Giá trị | Ý nghĩa |
+| :--- | :--- | :--- |
+| **RMSE** | **25.32** | Sai số trung bình thấp (~25 đơn vị). |
+| **MAE** | **12.32** | Sai số tuyệt đối rất nhỏ. |
+| **R² Score** | **0.95** | Giải thích được 95% biến động của dữ liệu. |
 
-## Data Preparation
+---
 
-Đặt file gốc vào:
-```
+## 📌 PHẦN 3: DỰ BÁO CHUỖI THỜI GIAN VỚI ARIMA (QUESTION 3)
 
-```bash
-data/raw/PRSA2017_Data_20130301-20170228.zip
-```
-Hoặc tải dataset Beijing Multi-Site Air Quality Data (UCI) và đặt các file trạm vào:
+### 3.1. Thiết lập mô hình
+* **Kiểm tra tính dừng:** Dữ liệu gốc có tính mùa vụ (seasonality) mạnh theo ngày/đêm.
+* **Chọn tham số (p, d, q):**
+    * Phân tích biểu đồ tự tương quan (ACF) và tự tương quan riêng phần (PACF).
+    * Tham số tốt nhất tìm được: `ARIMA(1, 0, 3)` (Ví dụ).
 
-```bash 
-data/raw/
-```
-Ví dụ
+<div align="center">
+  <img src="images/anh2.png" width="700" alt="Actual vs Predicted của Regression">
+</div>
 
-```bash
-data/raw/station_01.csv
-data/raw/station_02.csv
-...
-data/raw/station_12.csv
-```
+### 3.2. Kết quả thực nghiệm
+Mô hình ARIMA cho kết quả **kém hơn nhiều** so với Hồi quy.
+* Đường dự báo có xu hướng "đi ngang" (về giá trị trung bình) và không bắt được các đỉnh nhọn (Spikes) của những đợt ô nhiễm đột biến.
 
-File output sẽ được sinh tự động vào:
-```bash
-data/processed/
-```
+**Bảng chỉ số đánh giá:**
 
+| Chỉ số | Giá trị |
+| :--- | :--- |
+| **RMSE** | **104.10** |
+| **MAE** | **77.69** |
 
+<div align="center">
+  <img src="images/anh3.png" width="700" alt="ARIMA">
+</div>
+---
 
-Run Pipeline (Recommended)
-Chạy toàn bộ phân tích chỉ với 1 lệnh:
+## 📌 PHẦN 4: TỔNG KẾT & SO SÁNH
 
-```bash
-python run_papermill.py
-```
-Kết quả sinh ra:
+### 4.1. Bảng so sánh hiệu năng (Test Set 2017)
 
-```bash
-data/processed/cleaned.parquet
-data/processed/dataset_for_clf.parquet
-data/processed/metrics.json
-data/processed/predictions_sample.csv
+| Mô hình | RMSE (Thấp hơn là tốt hơn) | Đánh giá |
+| :--- | :--- | :--- |
+| **Regression (Baseline)** | **25.32** | 🏆 **Tốt nhất.** Dự báo chính xác nhờ nắm bắt được quy luật từ Lag Features. |
+| **ARIMA** | 104.10 | **Kém.** Sai số lớn gấp 4 lần so với Hồi quy. |
 
-data/processed/dataset_for_regression.parquet
-data/processed/regressor.joblib
-data/processed/regression_metrics.json
-data/processed/regression_predictions_sample.csv
+### 4.2. Kết luận
+1.  **Regression thắng thế:** Đối với dữ liệu chất lượng không khí có tính chu kỳ ngày đêm mạnh (24h), việc sử dụng đặc trưng **Lag_24** trực tiếp trong mô hình Hồi quy hiệu quả hơn hẳn so với mô hình ARIMA thuần túy.
+2.  **Hạn chế của ARIMA:** ARIMA `(p,d,q)` gặp khó khăn khi xử lý các chuỗi dữ liệu dài, biến động mạnh và có tính mùa vụ phức tạp nếu không sử dụng biến thể SARIMA hoặc biến ngoại sinh.
 
-data/processed/arima_pm25_summary.json
-data/processed/arima_pm25_predictions.csv
-data/processed/arima_pm25_model.pkl
-
-notebooks/runs/arima_forecasting_run.ipynb
-```
-
-### Changing Parameters
-Các tham số có thể chỉnh trong run_papermill.py:
-
-#### Preprocessing/EDA
-```python
-USE_UCIMLREPO = False
-RAW_ZIP_PATH = "data/raw/PRSA2017_Data_20130301-20170228.zip"
-LAG_HOURS = [1, 3, 24]
-```
-
-#### Classification
-```python
-CUTOFF = "2017-01-01"   # time-based split
-# (PM2.5 bị loại khỏi features trong library để tránh leakage)
-```
-
-#### Regression
-```python
-HORIZON = 1                       # dự đoán PM2.5(t + HORIZON)
-TARGET_COL = "PM2.5"
-OUTPUT_REG_DATASET_PATH = "data/processed/dataset_for_regression.parquet"
-CUTOFF = "2017-01-01"
-MODEL_OUT = "regressor.joblib"
-METRICS_OUT = "regression_metrics.json"
-PRED_SAMPLE_OUT = "regression_predictions_sample.csv"
-```
-
-#### ARIMA 
-```
-STATION = "Aotizhongxin"
-VALUE_COL = "PM2.5"
-CUTOFF = "2017-01-01"
-
-P_MAX = 3
-Q_MAX = 3
-D_MAX = 2
-IC = "aic"                         # hoặc "bic"
-ARTIFACTS_PREFIX = "arima_pm25"
-```
-
-
-Hoặc sửa trong cell PARAMETERS của mỗi notebook để chạy với cấu hình khác nhau.
-
-### Visualization & Results
-
-Notebook preprocessing_and_eda.ipynb:
-
-  kiểm tra missingness, phân phối, xu hướng theo thời gian
-
-  gợi ý seasonality (24h, tuần) để định hướng mô hình
-
-Notebook regression_modelling.ipynb:
-
-  dự đoán PM2.5(t+h), đánh giá RMSE/MAE/R2, minh hoạ leakage và lý do time-split
-
-Notebook arima_forecasting.ipynb:
-
-  ADF/KPSS, rolling mean/std, ACF/PACF
-
-  chọn (p,d,q) theo AIC/BIC và dự báo ARIMA
-
-Bạn có thể export notebook chạy ra HTML:
-
-```bash
-jupyter nbconvert notebooks/runs/03_classification_modelling_run.ipynb --to html
-```
-
-## Ứng dụng thực tế 
-
-Thiết kế bài giảng “end-to-end”:
-
-  phân lớp mức độ ô nhiễm (classification) + chống leakage
-
-  hồi quy dự đoán chỉ số PM2.5 tương lai (regression)
-
-  phân tích chuỗi thời gian và quyết định dùng ARIMA (time series)
-
-Demo ra quyết định mô hình dựa trên:
-
-  stationarity (ADF/KPSS), ACF/PACF
-
-  tiêu chí IC (AIC/BIC) và kiểm tra sai số dự báo
-
-### Tech Stack
-
-| Công nghệ | Mục đích |
-|----------|----------|
-| Python | Ngôn ngữ chính |
-| Pandas | Xử lý dữ liệu transaction |
-| Scikit-learn | Modelling & metrics |
-| Statsmodels  | ARIMA               |
-| Papermill | Chạy pipeline notebook tự động |
-| Matplotlib & Seaborn | Visualization biểu đồ tĩnh |
-| Plotly | Dashboard / biểu đồ tương tác |
-| Jupyter Notebook | Môi trường notebook |
-
-### Author
-Project được thực hiện bởi:
-Trang Le
-
-### License
-MIT — sử dụng tự do cho nghiên cứu, học thuật và ứng dụng nội bộ.
+---
+*Người thực hiện: Nhóm 2*
